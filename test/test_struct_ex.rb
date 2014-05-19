@@ -4,17 +4,25 @@ require 'ffi/struct_ex'
 
 class TestStructEx < Test::Unit::TestCase
   def test_bit_fields
-    subject = Class.new(FFI::StructEx) do
+    subject_class = Class.new(FFI::StructEx) do
       layout :field_0, bit_fields(:bits_0_2, 3,
                                   :bit_3,    1,
                                   :bit_4,    1,
-                                  :bits_5_7, 3),
+                                  :bits_5_7, 3,
+                                  :bits_8_15, 8),
              :field_1, :uint8,
              :field_2, :uint8,
-             :field_3, [:uint8, 2]
-    end.new
+             :field_3, :uint8
+    end
+
+    assert_equal(6, subject_class.size)
+    assert_equal(2, subject_class.alignment)
+    assert_equal(2, subject_class.offset_of(:field_1))
+
+    subject = subject_class.new
 
     assert_equal(FFI::StructEx, subject[:field_0].class.superclass)
+    assert_equal(2, subject[:field_0].size)
 
     subject[:field_0] = 0b0110_1001
     assert_equal(0b0110_1001, subject[:field_0].read)
@@ -27,6 +35,13 @@ class TestStructEx < Test::Unit::TestCase
     subject[:field_0] = {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011}
     assert_equal(0b0110_1001, subject[:field_0].read)
     assert_equal(0b001, subject[:field_0][:bits_0_2])
+
+    assert(subject[:field_0] == {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011})
+
+    subject[:field_1] = 1
+    subject[:field_2] = 2
+    subject[:field_3] = 3
+    assert(subject == {field_0: {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011}, field_1: 1, field_2: 2, field_3: 3})
   end
 
   def test_pure_bit_fields
@@ -36,6 +51,9 @@ class TestStructEx < Test::Unit::TestCase
              :bit_4,    1,
              :bits_5_7, 3
     end
+
+    assert_equal(1, subject_class.size)
+    assert_equal(1, subject_class.alignment)
 
     subject = subject_class.new
 

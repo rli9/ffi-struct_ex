@@ -53,6 +53,7 @@ module FFI
       def layout(*descs)
         if descs.size == 0 || !descs[1].is_a?(Integer)
           super(*descs)
+          #@bits_size = self.size * 8
         else
           @bit_layouts = {}
 
@@ -83,6 +84,7 @@ module FFI
       end
 
       def alignment
+        return super unless self.bit_layouts
         #FIXME consider 24 bits situation
         FFI.find_type("uint#{bytes_size * 8}".to_sym).alignment
       end
@@ -108,6 +110,7 @@ module FFI
 
     def []=(bit_field_name, value)
       return super unless self.class.bit_layouts && self.class.bit_layouts.keys.include?(bit_field_name)
+
       value = look_for_value(bit_field_name, value)
 
       bit_layout = self.class.bit_layouts[bit_field_name]
@@ -135,6 +138,16 @@ module FFI
       self.class.bytes_size
     end
 
+    def ==(other)
+      if other.is_a?(Integer)
+        self.read == other
+      elsif other.is_a?(Hash)
+        other.all? {|k, v| self[k] == self.look_for_value(k, v)}
+      else
+        super
+      end
+    end
+
     def look_for_value(bit_field_name, value)
       #FIXME add error handling
       if value.kind_of?(Integer)
@@ -154,6 +167,8 @@ module FFI
               value.to_i(2)
           end
         end
+      else
+        value
       end
     end
   end

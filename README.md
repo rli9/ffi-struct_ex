@@ -62,6 +62,8 @@ subject[:field_0].read #=> 0b0110_1101
 
 subject[:field_0] = {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011}
 subject[:field_0].read #=> 0b0110_1001
+
+subject[:field_0] == {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011} #=> true
 ```
 
 ## Contributing

@@ -26,17 +26,14 @@ end
 
 module FFI
   class StructEx < FFI::Struct
-    BitLayout = ::Struct.new(:name, :bits, :offset, :texts)
-
     class << self
-      def bit_fields(*descs)
+      def bit_fields(*field_specs)
         struct_class = Class.new(StructEx) do
-          layout(*descs)
+          layout(*field_specs)
         end
 
         bit_fields_class = Class.new(FFI::StructLayout::Field) do
           def initialize(name, offset, type)
-            #TODO use a different native_type to avoid dummy field for struct
             super(name, offset, FFI::Type::Struct.new(self.class.struct_class))
           end
 
@@ -55,51 +52,63 @@ module FFI
             def alignment
               struct_class.alignment
             end
+
+            def size
+              struct_class.size
+            end
           end
 
           self.struct_class = struct_class
         end
       end
 
-      attr_reader :bits_size, :bit_layouts
+      attr_reader :bits_size, :field_specs, :has_bit_field
 
-      def layout(*descs)
-        if descs.size == 0 || !descs[1].is_a?(Integer)
-          super(*descs)
-          @bits_size = self.size * 8
-        else
-          @bit_layouts = {}
+      def layout(*field_specs)
+        return super if field_specs.size == 0
 
-          index = @bits_size = 0
+        field_spec_class = ::Struct.new(:name, :type, :bits_offset, :descriptors)
 
-          while index < descs.size
-            field_name, bits, texts = descs[index, 3]
+        @field_specs = {}
 
-            if texts.kind_of?(Hash)
-              @bit_layouts[field_name] = BitLayout.new(field_name, bits, @bits_size, texts)
-              index += 3
-            else
-              @bit_layouts[field_name] = BitLayout.new(field_name, bits, @bits_size)
-              index += 2
+        i = bits_offset = 0
+
+        while i < field_specs.size
+          field_name, type = field_specs[i, 2]
+          i += 2
+
+          unless type.is_a?(Integer)
+            type = find_field_type(type)
+            bits_size = type.size * 8
+
+            if field_specs[i].is_a?(Integer)
+              bits_offset = field_specs[i] * 8
+              i += 1
             end
-
-            @bits_size += bits
+          else
+            bits_size = type
           end
 
+          if field_specs[i].is_a?(Hash)
+            descriptors = field_specs[i]
+            i += 1
+          else
+            descriptors = {}
+          end
+
+          @field_specs[field_name] = field_spec_class.new(field_name, type, bits_offset, descriptors)
+          bits_offset += bits_size
+        end
+
+        @has_bit_field = @field_specs.any? {|field_name, field_spec| field_spec.type.is_a?(Integer)}
+
+        if @has_bit_field
           #FIXME consider 24 bits situation or larger than 32 bits
           #FIXME remove dummy field or have a better name for this field
-          super(:dummy, "uint#{bytes_size * 8}".to_sym)
+          super(:dummy, "uint#{(bits_offset + 7) & (-1 << 3)}".to_sym)
+        else
+          super(*field_specs)
         end
-      end
-
-      def bytes_size
-        (bits_size + 7) >> 3
-      end
-
-      def alignment
-        return super unless self.bit_layouts
-        #FIXME consider 24 bits situation
-        FFI.find_type("uint#{bytes_size * 8}".to_sym).alignment
       end
     end
 
@@ -113,42 +122,38 @@ module FFI
     end
 
     def [](field_name)
-      return super unless self.class.bit_layouts && self.class.bit_layouts.keys.include?(field_name)
+      return super unless self.class.has_bit_field
 
-      bit_layout = self.class.bit_layouts[field_name]
-      mask = ((1 << bit_layout.bits) - 1) << bit_layout.offset
+      field_spec = self.class.field_specs[field_name]
+      mask = ((1 << field_spec.type) - 1) << field_spec.bits_offset
 
-      (self.read & mask) >> bit_layout.offset
+      (self.read & mask) >> field_spec.bits_offset
     end
 
     def []=(field_name, value)
-      return super unless self.class.bit_layouts && self.class.bit_layouts.keys.include?(field_name)
+      return super unless self.class.has_bit_field
 
       value = field_value(field_name, value)
 
-      bit_layout = self.class.bit_layouts[field_name]
-      mask = ((1 << bit_layout.bits) - 1) << bit_layout.offset
+      field_spec = self.class.field_specs[field_name]
+      mask = ((1 << field_spec.type) - 1) << field_spec.bits_offset
 
-      self.write((self.read & (-1 - mask)) | ((value << bit_layout.offset) & mask))
+      self.write((self.read & (-1 - mask)) | ((value << field_spec.bits_offset) & mask))
     end
 
     def write(value)
       if value.is_a?(Integer)
-        to_ptr.write_array_of_uint8(value.to_bytes(self.class.bytes_size))
+        to_ptr.write_array_of_uint8(value.to_bytes(self.class.size))
       elsif value.is_a?(Hash)
         value.each do |field_name, v|
-          self[field_name] = v# if self.class.bit_layouts.keys.include? field_name
+          self[field_name] = v
         end
       end
     end
 
     def read
-      bytes = to_ptr.read_array_of_uint8(self.class.bytes_size)
+      bytes = to_ptr.read_array_of_uint8(self.class.size)
       bytes.reverse.inject(0) {|value, n| (value << 8) | n}
-    end
-
-    def size
-      self.class.bytes_size
     end
 
     def ==(other)
@@ -166,35 +171,23 @@ module FFI
     # Return field value by converting value to corresponding native form
     #
     # @param [String, Symbol] field_name name of the field
-    # @param [String, Integer, Object] value value in readable form or native form
+    # @param [String, Integer, Object] value value in descriptive form or native form
     # @return [Object] value in native form
     def field_value(field_name, value)
-      if self.class.bit_layouts && self.class.bit_layouts.keys.include?(field_name)
-        #FIXME add error handling
+      type = self.class.field_specs[field_name].type
+
+      if type.is_a?(Integer) || FFI::StructLayoutBuilder::NUMBER_TYPES.include?(type)
         if value.kind_of?(Integer)
           value
         elsif value.kind_of?(String)
-          #FIXME this requires texts hash to have downcase key
+          #FIXME this requires descriptors hash to have downcase key
           value = value.downcase
-          if self.class.bit_layouts[field_name].texts && self.class.bit_layouts[field_name].texts[value]
-            self.class.bit_layouts[field_name].texts[value]
-          else
-            value.to_dec
-          end
+          self.class.field_specs[field_name].descriptors[value] || value.to_dec
         else
           raise "Unexpected value #{value}"
         end
       else
-        # if self[field_name].is_a?(FFI::StructLayout::CharArray)
-          # puts self[field_name].inspect
-        # else
-          #FIXME need align with bit_field type, if it is FFI::String, no need to convert value to Integer
-          if value.kind_of?(String)
-            value.to_dec
-          else
-            value
-          end
-        # end
+        value
       end
     end
   end

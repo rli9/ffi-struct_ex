@@ -108,4 +108,21 @@ class TestStructEx < Test::Unit::TestCase
     subject[:bit_3] = 1
     assert_equal(0b1, subject[:bit_3])
   end
+
+  def test_equality
+    subject_class = Class.new(FFI::StructEx) do
+      layout :field_0, bit_fields(:bits_0_2, 3,
+                                  :bit_3,    1,
+                                  :bit_4,    1,
+                                  :bits_5_7, 3),
+             :field_1, :uint8
+    end
+
+    subject = subject_class.new({field_0: {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011}, field_1: 0x1})
+
+    assert_equal(FFI::StructEx, subject[:field_0].class.superclass)
+    assert_equal(1, subject[:field_0].size)
+    assert(subject[:field_0] == 0b0110_1001)
+    assert(subject[:field_1] == subject.field_value(:field_1, '0x1'))
+  end
 end

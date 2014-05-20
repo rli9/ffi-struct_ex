@@ -11,6 +11,19 @@ class Integer
   end
 end
 
+class String
+  def to_dec
+    case self
+      when /^[+-]?\d+$/
+        self.to_i
+      when /^[+-]?0[xX][\da-fA-F_]+$/
+        self.to_i(16)
+      when /^[+-]?0[bB][_01]+$/
+        self.to_i(2)
+    end
+  end
+end
+
 module FFI
   class StructEx < FFI::Struct
     BitLayout = ::Struct.new(:name, :bits, :offset, :texts)
@@ -60,13 +73,13 @@ module FFI
           index = @bits_size = 0
 
           while index < descs.size
-            bit_field_name, bits, texts = descs[index, 3]
+            field_name, bits, texts = descs[index, 3]
 
             if texts.kind_of?(Hash)
-              @bit_layouts[bit_field_name] = BitLayout.new(bit_field_name, bits, @bits_size, texts)
+              @bit_layouts[field_name] = BitLayout.new(field_name, bits, @bits_size, texts)
               index += 3
             else
-              @bit_layouts[bit_field_name] = BitLayout.new(bit_field_name, bits, @bits_size)
+              @bit_layouts[field_name] = BitLayout.new(field_name, bits, @bits_size)
               index += 2
             end
 
@@ -99,21 +112,21 @@ module FFI
       end
     end
 
-    def [](bit_field_name)
-      return super unless self.class.bit_layouts && self.class.bit_layouts.keys.include?(bit_field_name)
+    def [](field_name)
+      return super unless self.class.bit_layouts && self.class.bit_layouts.keys.include?(field_name)
 
-      bit_layout = self.class.bit_layouts[bit_field_name]
+      bit_layout = self.class.bit_layouts[field_name]
       mask = ((1 << bit_layout.bits) - 1) << bit_layout.offset
 
       (self.read & mask) >> bit_layout.offset
     end
 
-    def []=(bit_field_name, value)
-      return super unless self.class.bit_layouts && self.class.bit_layouts.keys.include?(bit_field_name)
+    def []=(field_name, value)
+      return super unless self.class.bit_layouts && self.class.bit_layouts.keys.include?(field_name)
 
-      value = look_for_value(bit_field_name, value)
+      value = field_value(field_name, value)
 
-      bit_layout = self.class.bit_layouts[bit_field_name]
+      bit_layout = self.class.bit_layouts[field_name]
       mask = ((1 << bit_layout.bits) - 1) << bit_layout.offset
 
       self.write((self.read & (-1 - mask)) | ((value << bit_layout.offset) & mask))
@@ -123,8 +136,8 @@ module FFI
       if value.is_a?(Integer)
         to_ptr.write_array_of_uint8(value.to_bytes(self.class.bytes_size))
       elsif value.is_a?(Hash)
-        value.each do |bit_field_name, v|
-          self[bit_field_name] = v if self.class.bit_layouts.keys.include? bit_field_name
+        value.each do |field_name, v|
+          self[field_name] = v# if self.class.bit_layouts.keys.include? field_name
         end
       end
     end
@@ -142,44 +155,46 @@ module FFI
       if other.is_a?(Integer)
         self.read == other
       elsif other.is_a?(String)
-        other = other.downcase
-        value = case other
-          when /^\d+$/
-            other.to_i
-          when /^0x[\da-fA-F_]+$/
-            other.to_i(16)
-          when /^0b[_01]+$/
-            other.to_i(2)
-        end
-        self.==(value)
+        self.==(other.to_dec)
       elsif other.is_a?(Hash)
-        other.all? {|k, v| self[k] == self.look_for_value(k, v)}
+        other.all? {|k, v| self[k] == self.field_value(k, v)}
       else
         super
       end
     end
 
-    def look_for_value(bit_field_name, value)
-      #FIXME add error handling
-      if value.kind_of?(Integer)
-        value
-      elsif value.kind_of?(String)
-        #FIXME this requires texts hash to have downcase key
-        value = value.downcase
-        if self.class.bit_layouts[bit_field_name].texts && self.class.bit_layouts[bit_field_name].texts[value]
-          self.class.bit_layouts[bit_field_name].texts[value]
-        else
-          case value
-            when /^\d+$/
-              value.to_i
-            when /^0x[\da-fA-F_]+$/
-              value.to_i(16)
-            when /^0b[01_]+$/
-              value.to_i(2)
+    # Return field value by converting value to corresponding native form
+    #
+    # @param [String, Symbol] field_name name of the field
+    # @param [String, Integer, Object] value value in readable form or native form
+    # @return [Object] value in native form
+    def field_value(field_name, value)
+      if self.class.bit_layouts && self.class.bit_layouts.keys.include?(field_name)
+        #FIXME add error handling
+        if value.kind_of?(Integer)
+          value
+        elsif value.kind_of?(String)
+          #FIXME this requires texts hash to have downcase key
+          value = value.downcase
+          if self.class.bit_layouts[field_name].texts && self.class.bit_layouts[field_name].texts[value]
+            self.class.bit_layouts[field_name].texts[value]
+          else
+            value.to_dec
           end
+        else
+          raise "Unexpected value #{value}"
         end
       else
-        value
+        # if self[field_name].is_a?(FFI::StructLayout::CharArray)
+          # puts self[field_name].inspect
+        # else
+          #FIXME need align with bit_field type, if it is FFI::String, no need to convert value to Integer
+          if value.kind_of?(String)
+            value.to_dec
+          else
+            value
+          end
+        # end
       end
     end
   end

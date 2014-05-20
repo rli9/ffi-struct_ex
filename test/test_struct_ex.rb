@@ -36,12 +36,16 @@ class TestStructEx < Test::Unit::TestCase
     assert_equal(0b0110_1001, subject[:field_0].read)
     assert_equal(0b001, subject[:field_0][:bits_0_2])
 
-    assert(subject[:field_0] == {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011})
+    assert(subject[:field_0] == {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011, bits_8_15: 0b0})
+    assert(subject[:field_0] == 0b0110_1001)
+    assert(subject[:field_0] == '0b0110_1001')
 
     subject[:field_1] = 1
     subject[:field_2] = 2
     subject[:field_3] = 3
-    assert(subject == {field_0: {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011}, field_1: 1, field_2: 2, field_3: 3})
+    assert(subject == {field_0: {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011, bits_8_15: 0b0}, field_1: 1, field_2: 2, field_3: 3})
+    assert(subject == 0x0302010069)
+    assert(subject == '0x0302010069')
   end
 
   def test_pure_bit_fields

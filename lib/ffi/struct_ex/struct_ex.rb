@@ -53,7 +53,7 @@ module FFI
       def layout(*descs)
         if descs.size == 0 || !descs[1].is_a?(Integer)
           super(*descs)
-          #@bits_size = self.size * 8
+          @bits_size = self.size * 8
         else
           @bit_layouts = {}
 
@@ -141,6 +141,17 @@ module FFI
     def ==(other)
       if other.is_a?(Integer)
         self.read == other
+      elsif other.is_a?(String)
+        other = other.downcase
+        value = case other
+          when /^\d+$/
+            other.to_i
+          when /^0x[\da-fA-F_]+$/
+            other.to_i(16)
+          when /^0b[_01]+$/
+            other.to_i(2)
+        end
+        self.==(value)
       elsif other.is_a?(Hash)
         other.all? {|k, v| self[k] == self.look_for_value(k, v)}
       else
@@ -161,9 +172,9 @@ module FFI
           case value
             when /^\d+$/
               value.to_i
-            when /^0x[\da-fA-F]+$/
+            when /^0x[\da-fA-F_]+$/
               value.to_i(16)
-            when /^0b[01]+$/
+            when /^0b[01_]+$/
               value.to_i(2)
           end
         end

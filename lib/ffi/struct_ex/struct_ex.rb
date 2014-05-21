@@ -107,7 +107,7 @@ module FFI
           #FIXME remove dummy field or have a better name for this field
           super(:dummy, "uint#{(bits_offset + 7) & (-1 << 3)}".to_sym)
         else
-          super(*field_specs)
+          super(*field_specs.reject {|field_spec| field_spec.is_a?(Hash)})
         end
       end
     end
@@ -130,10 +130,11 @@ module FFI
       (self.read & mask) >> field_spec.bits_offset
     end
 
+    # Set field value
     def []=(field_name, value)
-      return super unless self.class.has_bit_field
+      value = map_field_value(field_name, value)
 
-      value = field_value(field_name, value)
+      return super(field_name, value) unless self.class.has_bit_field
 
       field_spec = self.class.field_specs[field_name]
       mask = ((1 << field_spec.type) - 1) << field_spec.bits_offset
@@ -162,33 +163,33 @@ module FFI
       elsif other.is_a?(String)
         self.==(other.to_dec)
       elsif other.is_a?(Hash)
-        other.all? {|k, v| self[k] == self.field_value(k, v)}
+        other.all? {|k, v| self[k] == self.map_field_value(k, v)}
       else
         super
       end
     end
 
-    # Return field value by converting value to corresponding native form
+    # Return mapped field value by converting {value} to corresponding native form.
+    # The priority is
+    #   1. look for descriptors
+    #   2. simple conversion from string to integer if integer type
+    #   3. {value} itself
     #
     # @param [String, Symbol] field_name name of the field
     # @param [String, Integer, Object] value value in descriptive form or native form
     # @return [Object] value in native form
-    def field_value(field_name, value)
+    def map_field_value(field_name, value)
       type = self.class.field_specs[field_name].type
 
       if type.is_a?(Integer) || FFI::StructLayoutBuilder::NUMBER_TYPES.include?(type)
-        if value.kind_of?(Integer)
-          value
-        elsif value.kind_of?(String)
-          #FIXME this requires descriptors hash to have downcase key
+        if value.kind_of?(String)
+          #FIXME this requires descriptors hash to have downcase and string only key
           value = value.downcase
-          self.class.field_specs[field_name].descriptors[value] || value.to_dec
-        else
-          raise "Unexpected value #{value}"
+          return self.class.field_specs[field_name].descriptors[value] || value.to_dec
         end
-      else
-        value
       end
+
+      value
     end
   end
 end

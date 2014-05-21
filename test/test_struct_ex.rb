@@ -123,6 +123,28 @@ class TestStructEx < Test::Unit::TestCase
     assert_equal(FFI::StructEx, subject[:field_0].class.superclass)
     assert_equal(1, subject[:field_0].size)
     assert(subject[:field_0] == 0b0110_1001)
-    assert(subject[:field_1] == subject.field_value(:field_1, '0x1'))
+    assert(subject[:field_1] == subject.map_field_value(:field_1, '0x1'))
+  end
+
+  def test_descriptors
+    subject_class = Class.new(FFI::StructEx) do
+      layout :field_0, :uint8, {'all_1' => 0xff, 'all_0' => 0x00},
+             :field_1, :uint8
+    end
+
+    assert_equal(2, subject_class.size)
+    assert_equal(1, subject_class.alignment)
+    assert_equal(1, subject_class.offset_of(:field_1))
+
+    subject = subject_class.new(field_0: 'all_1', field_1: 0x12)
+
+    assert_equal(0xff, subject[:field_0])
+    assert_equal(0x12, subject[:field_1])
+
+    subject[:field_0] = 'all_0'
+    assert_equal(0x00, subject[:field_0])
+
+    subject[:field_0] = 0x12
+    assert_equal(0x12, subject[:field_0])
   end
 end

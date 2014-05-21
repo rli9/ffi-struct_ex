@@ -179,15 +179,13 @@ module FFI
     # @param [String, Integer, Object] value value in descriptive form or native form
     # @return [Object] value in native form
     def map_field_value(field_name, value)
-      type = self.class.field_specs[field_name].type
+      field_spec = self.class.field_specs[field_name]
 
-      if type.is_a?(Integer) || FFI::StructLayoutBuilder::NUMBER_TYPES.include?(type)
-        if value.kind_of?(String)
-          #FIXME this requires descriptors hash to have downcase and string only key
-          value = value.downcase
-          return self.class.field_specs[field_name].descriptors[value] || value.to_dec
-        end
-      end
+      descriptor_key = value.kind_of?(String) ? value.downcase : value
+      return field_spec.descriptors[descriptor_key] if field_spec.descriptors.has_key?(descriptor_key)
+
+      type = field_spec.type
+      return value.to_dec if (type.is_a?(Integer) || FFI::StructLayoutBuilder::NUMBER_TYPES.include?(type)) && value.is_a?(String)
 
       value
     end

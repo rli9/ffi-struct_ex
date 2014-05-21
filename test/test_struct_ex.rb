@@ -129,7 +129,7 @@ class TestStructEx < Test::Unit::TestCase
   def test_descriptors
     subject_class = Class.new(FFI::StructEx) do
       layout :field_0, :uint8, {'all_1' => 0xff, 'all_0' => 0x00},
-             :field_1, :uint8
+             :field_1, :uint8, {3 => 1}
     end
 
     assert_equal(2, subject_class.size)
@@ -146,5 +146,8 @@ class TestStructEx < Test::Unit::TestCase
 
     subject[:field_0] = 0x12
     assert_equal(0x12, subject[:field_0])
+
+    subject[:field_1] = 3
+    assert_equal(0x1, subject[:field_1])
   end
 end

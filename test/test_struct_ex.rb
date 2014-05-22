@@ -150,4 +150,28 @@ class TestStructEx < Test::Unit::TestCase
     subject[:field_1] = 3
     assert_equal(0x1, subject[:field_1])
   end
+
+  def test_initialized_memory_should_be_zero
+    subject_class = Class.new(FFI::StructEx) do
+      layout :field_0, bit_fields(:bits_0_2, 3,
+                                  :bit_3,    1,
+                                  :bit_4,    1,
+                                  :bits_5_7, 3),
+             :field_1, :uint8
+    end
+
+    subject = subject_class.new
+
+    assert_equal(0x00, subject[:field_0])
+    assert_equal(0x00, subject[:field_1])
+  end
+
+  # def test_sizeof
+    # subject_class = Class.new(FFI::StructEx) do
+      # layout :field_0, 2,
+             # :field_1, 31
+    # end
+#
+    # assert_equal(8, subject_class.size)
+  # end
 end

@@ -18,22 +18,24 @@ Or install it yourself as:
 
 ## Usage
 
-* Struct (only support "unsigned" field)
+* Struct (default type is "unsigned char/short/int" depending on bits size)
 
 ```ruby
 require 'ffi/struct_ex'
 
 class Subject < FFI::StructEx
-  layout :bits_0_2, 3,
-         :bit_3,    1,
+  layout :bits_0_2, 'uint8: 3',
+         :bit_3,    'char: 1',
          :bit_4,    1,
-         :bits_5_7, 3
+         :bits_5_7, 'char: 3'
 end
 
-subject = Subject.new(bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011)
+Subject.size #=> 1
 
-subject[:bits_0_2] #=> 0b101
-subject.read #=> 0b0110_1001
+subject = Subject.new(bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b1, bits_5_7: 0b100)
+
+subject[:bits_0_2] #=> 1
+subject[:bits_5_7] #=> -4
 ```
 
 * Struct (embedded bit fields)

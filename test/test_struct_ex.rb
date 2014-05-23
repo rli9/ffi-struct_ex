@@ -328,6 +328,20 @@ class TestStructEx < Test::Unit::TestCase
                              :field_1, 'int: 1'
                     end
 
+    subject_class = Class.new(FFI::StructEx) do
+      layout :bits_0_2, 'uint8: 3',
+             :bit_3,    'char: 1',
+             :bit_4,    'uint8: 1',
+             :bits_5_7, 'char: 3'
+    end
+
+    assert_equal(1, subject_class.size)
+
+    subject = subject_class.new(bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b1, bits_5_7: 0b100)
+    assert_equal(1, subject[:bits_0_2])
+    assert_equal(-1, subject[:bit_3])
+    assert_equal(1, subject[:bit_4])
+    assert_equal(-4, subject[:bits_5_7])
 
   end
 end

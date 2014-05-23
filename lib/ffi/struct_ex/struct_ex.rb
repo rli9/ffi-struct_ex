@@ -9,6 +9,10 @@ class Integer
 
     bytes
   end
+
+  def to_signed(bits_size)
+    self & (1 << bits_size - 1) != 0 ? self - (1 << bits_size) : self
+  end
 end
 
 class String
@@ -28,41 +32,72 @@ module FFI
   class StructEx < FFI::Struct
     class << self
       def bit_fields(*field_specs)
-        struct_class = Class.new(StructEx) do
-          layout(*field_specs)
-        end
+        Class.new(FFI::StructLayout::Field) do
+          class << self
+            attr_accessor :struct_class
 
-        bit_fields_class = Class.new(FFI::StructLayout::Field) do
+            def alignment; struct_class.alignment; end
+            def size; struct_class.size; end
+          end
+
+          self.struct_class = Class.new(StructEx) do
+            layout(*field_specs)
+          end
+
           def initialize(name, offset, type)
             super(name, offset, FFI::Type::Struct.new(self.class.struct_class))
           end
 
           def get(ptr)
-            #self.class.struct_class == type.struct_class
-            self.class.struct_class.new(ptr.slice(self.offset, self.size))
+            type.struct_class.new(ptr.slice(offset, size))
           end
 
           def put(ptr, value)
-            self.class.struct_class.new(ptr.slice(self.offset, self.size)).write(value)
+            type.struct_class.new(ptr.slice(offset, size)).write(value)
           end
-
-          class << self
-            attr_accessor :struct_class
-
-            def alignment
-              struct_class.alignment
-            end
-
-            def size
-              struct_class.size
-            end
-          end
-
-          self.struct_class = struct_class
         end
       end
 
-      attr_reader :bits_size, :field_specs, :has_bit_field
+      def bit_field(type, bits_size, bits_offset)
+        Class.new(FFI::StructLayout::Field) do
+          class << self
+            attr_accessor :type, :bits_size, :bits_offset, :struct_class
+            #no need to implement alignment b/c we always provide offset when adding this field to struct_layout_builder
+          end
+
+          self.struct_class = Class.new(Struct) do
+            layout('', type)
+          end
+
+          self.type, self.bits_size, self.bits_offset = type, bits_size, bits_offset
+
+          def initialize(name, offset, type)
+            super(name, offset, FFI::Type::Struct.new(self.class.struct_class))
+          end
+
+          def read(ptr)
+            ptr.slice(offset, size).send("read_uint#{size * 8}".to_sym)
+          end
+
+          def write(ptr, value)
+            ptr.slice(offset, size).send("write_uint#{size * 8}".to_sym, value)
+          end
+
+          def get(ptr)
+            mask = (1 << self.class.bits_size) - 1
+            value = (read(ptr) >> self.class.bits_offset) & mask
+
+            [FFI::Type::INT8, FFI::Type::INT16, FFI::Type::INT32, FFI::Type::INT64].include?(self.class.type) ? value.to_signed(self.class.bits_size) : value
+          end
+
+          def put(ptr, value)
+            mask = ((1 << self.class.bits_size) - 1) << self.class.bits_offset
+            write(ptr, (read(ptr) & ~mask) | ((value << self.class.bits_offset) & mask))
+          end
+        end
+      end
+
+      attr_reader :field_specs
 
       def layout(*field_specs)
         return super if field_specs.size == 0
@@ -71,22 +106,20 @@ module FFI
 
         @field_specs = {}
 
-        i = bits_offset = 0
+        @offset = 0
 
+        i = 0
         while i < field_specs.size
-          field_name, type = field_specs[i, 2]
+          name, type = field_specs[i, 2]
           i += 2
 
-          unless type.is_a?(Integer)
-            type = find_field_type(type)
-            bits_size = type.size * 8
-
+          unless type.is_a?(Integer) || type.is_a?(String)
             if field_specs[i].is_a?(Integer)
-              bits_offset = field_specs[i] * 8
+              offset = field_specs[i]
               i += 1
+            else
+              offset = nil
             end
-          else
-            bits_size = type
           end
 
           if field_specs[i].is_a?(Hash)
@@ -96,18 +129,70 @@ module FFI
             descriptors = {}
           end
 
-          @field_specs[field_name] = field_spec_class.new(field_name, type, bits_offset, descriptors)
-          bits_offset += bits_size
+          ffi_type, offset = add(name, type, offset, descriptors)
+
+          if type.is_a?(Integer) || type.is_a?(String)
+            if field_specs[i - 1].is_a?(Hash)
+              field_specs[i - 2] = ffi_type
+            else
+              field_specs[i - 1] = ffi_type
+            end
+            field_specs.insert(i, offset)
+            i += 1
+
+            @field_specs[name] = field_spec_class.new(name, type, offset, descriptors)
+          else
+            @field_specs[name] = field_spec_class.new(name, ffi_type, offset, descriptors)
+          end
         end
 
-        @has_bit_field = @field_specs.any? {|field_name, field_spec| field_spec.type.is_a?(Integer)}
+        super(*field_specs.reject {|field_spec| field_spec.is_a?(Hash)})
+      end
 
-        if @has_bit_field
-          #FIXME consider 24 bits situation or larger than 32 bits
-          #FIXME remove dummy field or have a better name for this field
-          super(:dummy, "uint#{(bits_offset + 7) & (-1 << 3)}".to_sym)
+      def add(field_name, field_type, offset, descriptors)
+        if field_type.is_a?(Integer)
+          integral_type = [Type::UINT8, Type::UINT16, Type::UINT32, Type::UINT64].find {|type| field_type <= type.size * 8}
+
+          add(field_name, "uint#{integral_type.size * 8}: #{field_type}", offset, descriptors)
         else
-          super(*field_specs.reject {|field_spec| field_spec.is_a?(Hash)})
+          if field_type.is_a?(String)
+            m = /^(?<integral_type>[\w_]+)\s*:\s*(?<bits_size>\d+)$/.match(field_type.strip)
+            raise "Unrecognized format #{field_type}" unless m
+
+            integral_type, bits_size = find_field_type(m[:integral_type].to_sym), m[:bits_size].to_i
+            raise "Illegal format #{field_type}" if bits_size > integral_type.size * 8
+
+            unless @current_allocation_unit
+              @current_allocation_unit = {integral_type: integral_type, bits_size: bits_size}
+            else
+              # Adjacent bit fields are packed into the same 1-, 2-, or 4-byte allocation unit if the integral types are the same size
+              # and if the next bit field fits into the current allocation unit without crossing the boundary
+              # imposed by the common alignment requirements of the bit fields.
+              if integral_type.size == @current_allocation_unit[:integral_type].size
+                if @current_allocation_unit[:bits_size] + bits_size <= integral_type.size * 8
+                  @current_allocation_unit[:bits_size] += bits_size
+                else
+                  @offset += integral_type.size
+                  @current_allocation_unit[:bits_size] = bits_size
+                end
+              else
+                @offset += [integral_type.size, @current_allocation_unit[:integral_type].size].max
+                @current_allocation_unit = {integral_type: integral_type, bits_size: bits_size}
+              end
+            end
+
+            type = bit_field(integral_type, bits_size, @current_allocation_unit[:bits_size] - bits_size)
+          else
+            type = find_field_type(field_type)
+
+            if @current_allocation_unit
+              @offset += [type.size, @current_allocation_unit[:integral_type].size].max
+              @current_allocation_unit = nil
+            end
+            @offset = (offset.nil? || offset == -1) ? @offset + type.size : offset + type.size
+          end
+
+          [type, @offset]
         end
       end
     end
@@ -121,25 +206,9 @@ module FFI
       end
     end
 
-    def [](field_name)
-      return super unless self.class.has_bit_field
-
-      field_spec = self.class.field_specs[field_name]
-      mask = ((1 << field_spec.type) - 1) << field_spec.bits_offset
-
-      (self.read & mask) >> field_spec.bits_offset
-    end
-
     # Set field value
     def []=(field_name, value)
-      value = map_field_value(field_name, value)
-
-      return super(field_name, value) unless self.class.has_bit_field
-
-      field_spec = self.class.field_specs[field_name]
-      mask = ((1 << field_spec.type) - 1) << field_spec.bits_offset
-
-      self.write((self.read & (-1 - mask)) | ((value << field_spec.bits_offset) & mask))
+      super(field_name, map_field_value(field_name, value))
     end
 
     def write(value)

@@ -5,11 +5,11 @@ require 'ffi/struct_ex'
 class TestStructEx < Test::Unit::TestCase
   def test_bit_fields
     subject_class = Class.new(FFI::StructEx) do
-      layout :field_0, bit_fields(:bits_0_2, 3,
-                                  :bit_3,    1,
-                                  :bit_4,    1,
-                                  :bits_5_7, 3,
-                                  :bits_8_15, 8),
+      layout :field_0, bit_fields(:bits_0_2, 'uint16: 3',
+                                  :bit_3,    'uint16: 1',
+                                  :bit_4,    'uint16: 1',
+                                  :bits_5_7, 'uint16: 3',
+                                  :bits_8_15, 'uint16: 8'),
              :field_1, :uint8,
              :field_2, :uint8,
              :field_3, :uint8
@@ -23,6 +23,7 @@ class TestStructEx < Test::Unit::TestCase
 
     assert_equal(FFI::StructEx, subject[:field_0].class.superclass)
     assert_equal(2, subject[:field_0].size)
+    assert_equal(2, subject[:field_0].alignment)
 
     subject[:field_0] = 0b0110_1001
     assert_equal(0b0110_1001, subject[:field_0].read)
@@ -122,8 +123,8 @@ class TestStructEx < Test::Unit::TestCase
 
     assert_equal(FFI::StructEx, subject[:field_0].class.superclass)
     assert_equal(1, subject[:field_0].size)
-    assert(subject[:field_0] == 0b0110_1001)
-    assert(subject[:field_1] == subject.map_field_value(:field_1, '0x1'))
+    assert_equal(0b0110_1001, subject[:field_0])
+    assert_equal(subject[:field_1], subject.map_field_value(:field_1, '0x1'))
   end
 
   def test_descriptors
@@ -166,12 +167,137 @@ class TestStructEx < Test::Unit::TestCase
     assert_equal(0x00, subject[:field_1])
   end
 
-  # def test_sizeof
-    # subject_class = Class.new(FFI::StructEx) do
-      # layout :field_0, 2,
-             # :field_1, 31
-    # end
-#
-    # assert_equal(8, subject_class.size)
-  # end
+  def test_sizeof
+    assert_equal(8, Class.new(FFI::StructEx) do
+                      layout :field_0, 31,
+                             :field_1, 31
+                    end.size)
+
+    assert_equal(8, Class.new(FFI::StructEx) do
+                      layout :field_0, 31,
+                             :field_1, :uint8
+                    end.size)
+
+    assert_equal(8, Class.new(FFI::StructEx) do
+                      layout :field_0, 1,
+                             :field_1, :uint32
+                    end.size)
+
+    assert_equal(3, Class.new(FFI::StructEx) do
+                      layout :field_0, 4,
+                             :field_1, 4,
+                             :field_2, 8,
+                             :field_3, :uint8
+                    end.size)
+
+    assert_equal(2, Class.new(FFI::StructEx) do
+                      layout :field_0, 1,
+                             :field_1, 1,
+                             :field_2, :uint8
+                    end.size)
+
+    assert_equal(3, Class.new(FFI::StructEx) do
+                      layout :field_0, 1,
+                             :field_1, 1,
+                             :field_2, :uint8,
+                             :field_3, 1,
+                             :field_4, 1
+                    end.size)
+
+    assert_equal(6, Class.new(FFI::StructEx) do
+                      layout :field_0, 1,
+                             :field_1, 1,
+                             :field_2, :uint16,
+                             :field_3, 1,
+                             :field_4, 1
+                    end.size)
+
+    assert_equal(4, Class.new(FFI::StructEx) do
+                      layout :field_0, 8,
+                             :field_1, 16
+                    end.size)
+
+    assert_equal(4, Class.new(FFI::StructEx) do
+                      layout :field_0, 16,
+                             :field_1, 8
+                    end.size)
+
+    assert_equal(6, Class.new(FFI::StructEx) do
+                      layout :field_0, 1,
+                             :field_1, 16,
+                             :field_2, 1
+                    end.size)
+
+    assert_equal(1, Class.new(FFI::StructEx) do
+                      layout :field_0, 'uint8: 1'
+                    end.size)
+
+    assert_equal(2, Class.new(FFI::StructEx) do
+                      layout :field_0, 'uint16: 1'
+                    end.size)
+
+    assert_equal(4, Class.new(FFI::StructEx) do
+                      layout :field_0, 'uint32: 1'
+                    end.size)
+
+    assert_equal(2, Class.new(FFI::StructEx) do
+                      layout :bits_0_2, 'uint16: 3',
+                             :bit_3,    'uint16: 1',
+                             :bit_4,    'uint16: 1',
+                             :bits_5_7, 'uint16: 3',
+                             :bits_8_15, 'uint16: 8'
+                    end.size)
+
+    assert_equal(1, Class.new(FFI::StructEx) do
+                      layout :field_0, 'uint8: 1',
+                             :field_1, 'uint8: 1'
+                    end.size)
+
+    assert_equal(1, Class.new(FFI::StructEx) do
+                      layout :field_0, 'uint8: 1',
+                             :field_1, 'int8: 1'
+                    end.size)
+
+    assert_equal(8, Class.new(FFI::StructEx) do
+                      layout :field_0, 'uint32: 1',
+                             :field_1, :uint16
+                    end.size)
+
+    assert_equal(8, Class.new(FFI::StructEx) do
+                      layout :field_0, 'uint8: 1',
+                             :field_1, :uint32
+                    end.size)
+
+    assert_equal(8, Class.new(FFI::StructEx) do
+                      layout :field_0, 'uint8: 1',
+                             :field_1, 'uint32: 1'
+                    end.size)
+
+    subject_class = Class.new(FFI::StructEx) do
+                      layout :field_0, 'uint: 8',
+                             :field_1, 'int: 1'
+                    end
+    assert_equal(4, subject_class.size)
+    subject = subject_class.new
+    subject[:field_0] = 0b0110_1001
+    assert_equal(0b0110_1001, subject[:field_0])
+    subject[:field_0] = 0b1111_1111
+    assert_equal(0b1111_1111, subject[:field_0])
+
+    subject[:field_1] = 1
+    assert_equal(-1, subject[:field_1])
+    subject[:field_1] = 0
+    assert_equal(0, subject[:field_1])
+    subject[:field_1] = -1
+    assert_equal(-1, subject[:field_1])
+
+    #Check no impact for typedef type
+    FFI.typedef :uint8, :UINT8
+    subject_class = Class.new(FFI::StructEx) do
+                      layout :field_0, 'UINT8: 8',
+                             :field_1, 'int: 1'
+                    end
+
+
+  end
 end

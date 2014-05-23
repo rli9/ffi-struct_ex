@@ -30,6 +30,9 @@ end
 
 module FFI
   class StructEx < FFI::Struct
+    SIGNED_NUMBER_TYPES = [FFI::Type::INT8, FFI::Type::INT16, FFI::Type::INT32, FFI::Type::INT64]
+    UNSIGNED_NUMBER_TYPES = [FFI::Type::UINT8, FFI::Type::UINT16, FFI::Type::UINT32, FFI::Type::UINT64]
+
     class << self
       def bit_fields(*field_specs)
         Class.new(FFI::StructLayout::Field) do
@@ -87,7 +90,7 @@ module FFI
             mask = (1 << self.class.bits_size) - 1
             value = (read(ptr) >> self.class.bits_offset) & mask
 
-            [FFI::Type::INT8, FFI::Type::INT16, FFI::Type::INT32, FFI::Type::INT64].include?(self.class.type) ? value.to_signed(self.class.bits_size) : value
+            SIGNED_NUMBER_TYPES.include?(self.class.type) ? value.to_signed(self.class.bits_size) : value
           end
 
           def put(ptr, value)
@@ -99,27 +102,68 @@ module FFI
 
       attr_reader :field_specs
 
-      def layout(*field_specs)
-        return super if field_specs.size == 0
-
-        field_spec_class = ::Struct.new(:name, :type, :bits_offset, :descriptors)
-
+      private
+      def array_layout(builder, field_specs)
         @field_specs = {}
 
-        @offset = 0
+        field_spec_class = ::Struct.new(:name, :type, :descriptors)
 
-        i = 0
+        current_allocation_unit = nil
+
+        offset = i = 0
+
         while i < field_specs.size
           name, type = field_specs[i, 2]
           i += 2
 
           unless type.is_a?(Integer) || type.is_a?(String)
+            # If the next param is a Integer, it specifies the offset
             if field_specs[i].is_a?(Integer)
               offset = field_specs[i]
               i += 1
             else
               offset = nil
             end
+
+            type = find_field_type(type)
+            builder.add name, type, offset
+
+            current_allocation_unit = nil
+          else
+            if type.is_a?(Integer)
+              ffi_type, bits_size = UNSIGNED_NUMBER_TYPES.find {|ffi_type| type <= ffi_type.size * 8}, type
+              raise "Unrecognized format #{type}" unless ffi_type
+            elsif type.is_a?(String)
+              m = /^(?<ffi_type>[\w_]+)\s*:\s*(?<bits_size>\d+)$/.match(type.strip)
+              raise "Unrecognized format #{type}" unless m
+
+              ffi_type, bits_size = find_field_type(m[:ffi_type].to_sym), m[:bits_size].to_i
+              raise "Unrecognized type #{type}" unless UNSIGNED_NUMBER_TYPES.include?(ffi_type) || SIGNED_NUMBER_TYPES.include?(ffi_type)
+            end
+
+            raise "Illegal format #{type}" if bits_size > ffi_type.size * 8
+
+            unless current_allocation_unit
+              current_allocation_unit = {ffi_type: ffi_type, bits_size: bits_size}
+              offset = builder.send(:align, builder.size, [@min_alignment || 1, ffi_type.alignment].max)
+            else
+              # Adjacent bit fields are packed into the same 1-, 2-, or 4-byte allocation unit if the integral types are the same size
+              # and if the next bit field fits into the current allocation unit without crossing the boundary
+              # imposed by the common alignment requirements of the bit fields.
+              if ffi_type.size == current_allocation_unit[:ffi_type].size
+                if current_allocation_unit[:bits_size] + bits_size <= ffi_type.size * 8
+                  current_allocation_unit[:bits_size] += bits_size
+                else
+                  offset = builder.send(:align, builder.size, [@min_alignment || 1, ffi_type.alignment].max)
+                  current_allocation_unit[:bits_size] = bits_size
+                end
+              else
+                offset = builder.send(:align, builder.size, [@min_alignment || 1, ffi_type.alignment].max)
+                current_allocation_unit = {ffi_type: ffi_type, bits_size: bits_size}
+              end
+            end
+
+            builder.add name, find_field_type(bit_field(ffi_type, bits_size, current_allocation_unit[:bits_size] - bits_size)), offset
           end
 
           if field_specs[i].is_a?(Hash)
@@ -129,70 +173,7 @@ module FFI
             descriptors = {}
           end
 
-          ffi_type, offset = add(name, type, offset, descriptors)
-
-          if type.is_a?(Integer) || type.is_a?(String)
-            if field_specs[i - 1].is_a?(Hash)
-              field_specs[i - 2] = ffi_type
-            else
-              field_specs[i - 1] = ffi_type
-            end
-            field_specs.insert(i, offset)
-            i += 1
-
-            @field_specs[name] = field_spec_class.new(name, type, offset, descriptors)
-          else
-            @field_specs[name] = field_spec_class.new(name, ffi_type, offset, descriptors)
-          end
-        end
-
-        super(*field_specs.reject {|field_spec| field_spec.is_a?(Hash)})
-      end
-
-      def add(field_name, field_type, offset, descriptors)
-        if field_type.is_a?(Integer)
-          integral_type = [Type::UINT8, Type::UINT16, Type::UINT32, Type::UINT64].find {|type| field_type <= type.size * 8}
-
-          add(field_name, "uint#{integral_type.size * 8}: #{field_type}", offset, descriptors)
-        else
-          if field_type.is_a?(String)
-            m = /^(?<integral_type>[\w_]+)\s*:\s*(?<bits_size>\d+)$/.match(field_type.strip)
-            raise "Unrecognized format #{field_type}" unless m
-
-            integral_type, bits_size = find_field_type(m[:integral_type].to_sym), m[:bits_size].to_i
-            raise "Illegal format #{field_type}" if bits_size > integral_type.size * 8
-
-            unless @current_allocation_unit
-              @current_allocation_unit = {integral_type: integral_type, bits_size: bits_size}
-            else
-              # Adjacent bit fields are packed into the same 1-, 2-, or 4-byte allocation unit if the integral types are the same size
-              # and if the next bit field fits into the current allocation unit without crossing the boundary
-              # imposed by the common alignment requirements of the bit fields.
-              if integral_type.size == @current_allocation_unit[:integral_type].size
-                if @current_allocation_unit[:bits_size] + bits_size <= integral_type.size * 8
-                  @current_allocation_unit[:bits_size] += bits_size
-                else
-                  @offset += integral_type.size
-                  @current_allocation_unit[:bits_size] = bits_size
-                end
-              else
-                @offset += [integral_type.size, @current_allocation_unit[:integral_type].size].max
-                @current_allocation_unit = {integral_type: integral_type, bits_size: bits_size}
-              end
-            end
-
-            type = bit_field(integral_type, bits_size, @current_allocation_unit[:bits_size] - bits_size)
-          else
-            type = find_field_type(field_type)
-
-            if @current_allocation_unit
-              @offset += [type.size, @current_allocation_unit[:integral_type].size].max
-              @current_allocation_unit = nil
-            end
-            @offset = (offset.nil? || offset == -1) ? @offset + type.size : offset + type.size
-          end
-
-          [type, @offset]
+          @field_specs[name] = field_spec_class.new(name, type, descriptors)
         end
       end
     end
@@ -254,7 +235,7 @@ module FFI
       return field_spec.descriptors[descriptor_key] if field_spec.descriptors.has_key?(descriptor_key)
 
       type = field_spec.type
-      return value.to_dec if (type.is_a?(Integer) || FFI::StructLayoutBuilder::NUMBER_TYPES.include?(type)) && value.is_a?(String)
+      return value.to_dec if (type.is_a?(Integer) || type.is_a?(String) || FFI::StructLayoutBuilder::NUMBER_TYPES.include?(type)) && value.is_a?(String)
 
       value
     end

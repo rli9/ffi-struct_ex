@@ -168,6 +168,12 @@ class TestStructEx < Test::Unit::TestCase
   end
 
   def test_sizeof
+    assert_equal(4, Class.new(FFI::StructEx) do
+                      layout :field_0, :short,
+                             :field_1, :char,
+                             :field_2, :char
+                    end.size)
+
     assert_equal(8, Class.new(FFI::StructEx) do
                       layout :field_0, 31,
                              :field_1, 31
@@ -210,6 +216,14 @@ class TestStructEx < Test::Unit::TestCase
                              :field_2, :uint16,
                              :field_3, 1,
                              :field_4, 1
+                    end.size)
+
+    assert_equal(6, Class.new(FFI::StructEx) do
+                      layout :field_0, 1,
+                             :field_1, 1,
+                             :field_2, :uint16,
+                             :field_3, 1,
+                             :field_4, 8
                     end.size)
 
     assert_equal(4, Class.new(FFI::StructEx) do
@@ -272,6 +286,22 @@ class TestStructEx < Test::Unit::TestCase
                       layout :field_0, 'uint8: 1',
                              :field_1, 'uint32: 1'
                     end.size)
+
+    assert_equal(4, Class.new(FFI::StructEx) do
+                      layout :field_0, :short,
+                             :field_1, :char
+                    end.size)
+
+    assert_equal(4, Class.new(FFI::StructEx) do
+                      layout :field_0, :short,
+                             :field_1, 'char: 1'
+                    end.size)
+
+    subject_class = Class.new(FFI::StructEx) do
+                      layout :field_0, :char,
+                             :field_1, 'short: 1'
+                    end
+    assert_equal(4, subject_class.size)
 
     subject_class = Class.new(FFI::StructEx) do
                       layout :field_0, 'uint: 8',

@@ -1,15 +1,6 @@
 require 'ffi'
 
 class Integer
-  def to_bytes(size)
-    bytes = [0] * size
-    bytes.each_index do |i|
-      bytes[i] = (self >> (i * 8)) & 0xff
-    end
-
-    bytes
-  end
-
   def to_signed(bits_size)
     self & (1 << bits_size - 1) != 0 ? self - (1 << bits_size) : self
   end
@@ -32,9 +23,10 @@ module FFI
   class StructEx < FFI::Struct
     SIGNED_NUMBER_TYPES = [FFI::Type::INT8, FFI::Type::INT16, FFI::Type::INT32, FFI::Type::INT64]
     UNSIGNED_NUMBER_TYPES = [FFI::Type::UINT8, FFI::Type::UINT16, FFI::Type::UINT32, FFI::Type::UINT64]
+    NUMBER_TYPES = SIGNED_NUMBER_TYPES + UNSIGNED_NUMBER_TYPES
 
     class << self
-      def bit_fields(*field_specs)
+      def struct_ex(*field_specs)
         Class.new(FFI::StructLayout::Field) do
           class << self
             attr_accessor :struct_class
@@ -104,13 +96,13 @@ module FFI
 
       private
       def array_layout(builder, field_specs)
-        @field_specs = {}
-
         field_spec_class = ::Struct.new(:name, :type, :descriptors)
 
-        current_allocation_unit = nil
+        @field_specs = {}
 
-        offset = i = 0
+        bits_unit = nil
+
+        i = 0
 
         while i < field_specs.size
           name, type = field_specs[i, 2]
@@ -128,7 +120,7 @@ module FFI
             type = find_field_type(type)
             builder.add name, type, offset
 
-            current_allocation_unit = nil
+            bits_unit = nil
           else
             if type.is_a?(Integer)
               ffi_type, bits_size = UNSIGNED_NUMBER_TYPES.find {|ffi_type| type <= ffi_type.size * 8}, type
@@ -138,32 +130,22 @@ module FFI
               raise "Unrecognized format #{type}" unless m
 
               ffi_type, bits_size = find_field_type(m[:ffi_type].to_sym), m[:bits_size].to_i
-              raise "Unrecognized type #{type}" unless UNSIGNED_NUMBER_TYPES.include?(ffi_type) || SIGNED_NUMBER_TYPES.include?(ffi_type)
+              raise "Unrecognized type #{type}" unless NUMBER_TYPES.include?(ffi_type)
             end
 
             raise "Illegal format #{type}" if bits_size > ffi_type.size * 8
 
-            unless current_allocation_unit
-              current_allocation_unit = {ffi_type: ffi_type, bits_size: bits_size}
-              offset = builder.send(:align, builder.size, [@min_alignment || 1, ffi_type.alignment].max)
+            # Adjacent bit fields are packed into the same 1-, 2-, or 4-byte allocation unit if the integral types are the same size
+            # and if the next bit field fits into the current allocation unit without crossing the boundary
+            # imposed by the common alignment requirements of the bit fields.
+            if bits_unit && bits_unit[:ffi_type].size == ffi_type.size && bits_unit[:bits_size] + bits_size <= bits_unit[:ffi_type].size * 8
+              bits_unit[:bits_size] += bits_size
             else
-              # Adjacent bit fields are packed into the same 1-, 2-, or 4-byte allocation unit if the integral types are the same size
-              # and if the next bit field fits into the current allocation unit without crossing the boundary
-              # imposed by the common alignment requirements of the bit fields.
-              if ffi_type.size == current_allocation_unit[:ffi_type].size
-                if current_allocation_unit[:bits_size] + bits_size <= ffi_type.size * 8
-                  current_allocation_unit[:bits_size] += bits_size
-                else
-                  offset = builder.send(:align, builder.size, [@min_alignment || 1, ffi_type.alignment].max)
-                  current_allocation_unit[:bits_size] = bits_size
-                end
-              else
-                offset = builder.send(:align, builder.size, [@min_alignment || 1, ffi_type.alignment].max)
-                current_allocation_unit = {ffi_type: ffi_type, bits_size: bits_size}
-              end
+              offset = builder.send(:align, builder.size, [@min_alignment || 1, ffi_type.alignment].max)
+              bits_unit = {ffi_type: ffi_type, bits_size: bits_size}
             end
 
-            builder.add name, find_field_type(bit_field(ffi_type, bits_size, current_allocation_unit[:bits_size] - bits_size)), offset
+            builder.add name, find_field_type(bit_field(ffi_type, bits_size, bits_unit[:bits_size] - bits_size)), offset
           end
 
           if field_specs[i].is_a?(Hash)
@@ -193,26 +175,17 @@ module FFI
     end
 
     def write(value)
-      if value.is_a?(Integer)
-        to_ptr.write_array_of_uint8(value.to_bytes(self.class.size))
-      elsif value.is_a?(Hash)
+      if value.is_a?(Hash)
         value.each do |field_name, v|
           self[field_name] = v
         end
+      elsif value.is_a?(self.class)
+        self.pointer.__copy_from__(value.pointer, self.size)
       end
     end
 
-    def read
-      bytes = to_ptr.read_array_of_uint8(self.class.size)
-      bytes.reverse.inject(0) {|value, n| (value << 8) | n}
-    end
-
     def ==(other)
-      if other.is_a?(Integer)
-        self.read == other
-      elsif other.is_a?(String)
-        self.==(other.to_dec)
-      elsif other.is_a?(Hash)
+      if other.is_a?(Hash)
         other.all? {|k, v| self[k] == self.map_field_value(k, v)}
       else
         super

@@ -3,53 +3,53 @@ require 'test/unit'
 require 'ffi/struct_ex'
 
 class TestStructEx < Test::Unit::TestCase
-  def test_bit_fields
+  def test_struct_ex
     subject_class = Class.new(FFI::StructEx) do
-      layout :field_0, bit_fields(:bits_0_2, 'uint16: 3',
+      layout :field_0, struct_ex(:bits_0_2, 'uint16: 3',
                                   :bit_3,    'uint16: 1',
                                   :bit_4,    'uint16: 1',
                                   :bits_5_7, 'uint16: 3',
-                                  :bits_8_15, 'uint16: 8'),
+                                  :bits_8_15, :uint8),
              :field_1, :uint8,
              :field_2, :uint8,
              :field_3, :uint8
     end
 
-    assert_equal(6, subject_class.size)
+    assert_equal(8, subject_class.size)
     assert_equal(2, subject_class.alignment)
-    assert_equal(2, subject_class.offset_of(:field_1))
+    assert_equal(4, subject_class.offset_of(:field_1))
 
     subject = subject_class.new
 
     assert_equal(FFI::StructEx, subject[:field_0].class.superclass)
-    assert_equal(2, subject[:field_0].size)
+    assert_equal(4, subject[:field_0].size)
     assert_equal(2, subject[:field_0].alignment)
 
-    subject[:field_0] = 0b0110_1001
-    assert_equal(0b0110_1001, subject[:field_0].read)
+    subject[:field_0].to_ptr.write_uint16(0b0110_1001)
+    assert_equal(0b0110_1001, subject[:field_0].to_ptr.read_uint16)
     assert_equal(0b001, subject[:field_0][:bits_0_2])
 
     subject[:field_0][:bits_0_2] = 0b101
     assert_equal(0b101, subject[:field_0][:bits_0_2])
-    assert_equal(0b0110_1101, subject[:field_0].read)
+    assert_equal(0b0110_1101, subject[:field_0].to_ptr.read_uint16)
 
     subject[:field_0] = {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011}
-    assert_equal(0b0110_1001, subject[:field_0].read)
+    assert_equal(0b0110_1001, subject[:field_0].to_ptr.read_uint16)
     assert_equal(0b001, subject[:field_0][:bits_0_2])
 
-    assert(subject[:field_0] == {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011, bits_8_15: 0b0})
-    assert(subject[:field_0] == 0b0110_1001)
-    assert(subject[:field_0] == '0b0110_1001')
+    assert_equal(subject[:field_0], {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011, bits_8_15: 0b0})
+    assert_equal(subject[:field_0].to_ptr.read_uint16, 0b0110_1001)
 
     subject[:field_1] = 1
     subject[:field_2] = 2
     subject[:field_3] = 3
-    assert(subject == {field_0: {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011, bits_8_15: 0b0}, field_1: 1, field_2: 2, field_3: 3})
-    assert(subject == 0x0302010069)
-    assert(subject == '0x0302010069')
+    assert_equal(subject, {field_0: {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011, bits_8_15: 0b0}, field_1: 1, field_2: 2, field_3: 3})
+
+    subject[:field_0] = subject[:field_0].class.new(bits_0_2: 0b111, bit_3: 0b0, bit_4: 0b0, bits_5_7: 0b101, bits_8_15: 0b10011100)
+    assert_equal(subject[:field_0].to_ptr.read_uint32, 0b10011100_00000000_10100111)
   end
 
-  def test_pure_bit_fields
+  def test_pure_struct_ex
     subject_class = Class.new(FFI::StructEx) do
       layout :bits_0_2, 3,
              :bit_3,    1,
@@ -69,7 +69,8 @@ class TestStructEx < Test::Unit::TestCase
     assert_equal(0b1, subject[:bit_3])
     assert_equal(0b101, subject[:bits_0_2])
 
-    subject = subject_class.new(0b0110_1001)
+    subject = subject_class.new
+    subject.to_ptr.write_uint8(0b0110_1001)
     assert_equal(0b001, subject[:bits_0_2])
     assert_equal(0b1, subject[:bit_3])
     assert_equal(0b0, subject[:bit_4])
@@ -80,10 +81,10 @@ class TestStructEx < Test::Unit::TestCase
     assert_equal(0b1, subject[:bit_3])
     assert_equal(0b0, subject[:bit_4])
     assert_equal(0b011, subject[:bits_5_7])
-    assert_equal(0b0110_1001, subject.read)
+    assert_equal(0b0110_1001, subject.to_ptr.read_uint8)
   end
 
-  def test_interpreted_bit_fields
+  def test_interpreted_struct_ex
     subject_class = Class.new(FFI::StructEx) do
       layout :bits_0_2, 3, {'all_1' => 0b111, 'all_0' => 0b000},
              :bit_3,    1, {'yes' => 0b1, 'no' => 0b0},
@@ -112,18 +113,18 @@ class TestStructEx < Test::Unit::TestCase
 
   def test_equality
     subject_class = Class.new(FFI::StructEx) do
-      layout :field_0, bit_fields(:bits_0_2, 3,
+      layout :field_0, struct_ex(:bits_0_2, 3,
                                   :bit_3,    1,
                                   :bit_4,    1,
                                   :bits_5_7, 3),
              :field_1, :uint8
     end
 
-    subject = subject_class.new({field_0: {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011}, field_1: 0x1})
+    subject = subject_class.new(field_0: {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011}, field_1: 0x1)
 
     assert_equal(FFI::StructEx, subject[:field_0].class.superclass)
     assert_equal(1, subject[:field_0].size)
-    assert_equal(0b0110_1001, subject[:field_0])
+    assert_equal(0b0110_1001, subject[:field_0].to_ptr.read_uint8)
     assert_equal(subject[:field_1], subject.map_field_value(:field_1, '0x1'))
   end
 
@@ -154,7 +155,7 @@ class TestStructEx < Test::Unit::TestCase
 
   def test_initialized_memory_should_be_zero
     subject_class = Class.new(FFI::StructEx) do
-      layout :field_0, bit_fields(:bits_0_2, 3,
+      layout :field_0, struct_ex(:bits_0_2, 3,
                                   :bit_3,    1,
                                   :bit_4,    1,
                                   :bits_5_7, 3),
@@ -163,7 +164,7 @@ class TestStructEx < Test::Unit::TestCase
 
     subject = subject_class.new
 
-    assert_equal(0x00, subject[:field_0])
+    assert_equal(0x00, subject[:field_0].to_ptr.read_uint8)
     assert_equal(0x00, subject[:field_1])
   end
 

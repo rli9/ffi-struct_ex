@@ -1,8 +1,8 @@
 require 'rubygems'
 require 'bundler/setup'
 require "bundler/gem_tasks"
-require 'rake/testtask'
+require 'rspec/core/rake_task'
 
-Rake::TestTask.new do |t|
-  t.libs << 'lib' << 'test'
+RSpec::Core::RakeTask.new(:spec) do |t|
+  t.ruby_opts = "-w -I\"#{['lib', 'spec'].join(File::PATH_SEPARATOR)}\""
 end

@@ -38,13 +38,13 @@ subject[:bits_0_2] #=> 1
 subject[:bits_5_7] #=> -4
 ```
 
-* Struct (embedded bit fields)
+* Struct (embedded struct)
 
 ```ruby
 require 'ffi/struct_ex'
 
 class Subject < FFI::StructEx
-  layout :field_0, bit_fields(:bits_0_2, 3,
+  layout :field_0, struct_ex(:bits_0_2, 3,
                               :bit_3,    1,
                               :bit_4,    1,
                               :bits_5_7, 3),
@@ -56,19 +56,17 @@ end
 subject[:field_0].class.superclass #=> FFI::StructEx
 
 subject[:field_0] = 0b0110_1001
-subject[:field_0].read #=> 0b0110_1001
+subject[:field_0].pointer.read_uint8 #=> 0b0110_1001
 
 subject[:field_0][:bits_0_2] = 0b101
 subject[:field_0][:bits_0_2] #=> 0b101
-subject[:field_0].read #=> 0b0110_1101
+subject[:field_0].pointer.read_uint8 #=> 0b0110_1101
 
 subject[:field_0] = {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011}
-subject[:field_0].read #=> 0b0110_1001
+subject[:field_0].pointer.read_uint8 #=> 0b0110_1001
 
 #Equality check
 subject[:field_0] == {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011} #=> true
-subject[:field_0] == 0b0110_1001 #=> true
-subject[:field_0] == '0b0110_1001' #=> true
 ```
 
 ## Contributing

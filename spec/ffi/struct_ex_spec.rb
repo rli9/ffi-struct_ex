@@ -121,6 +121,94 @@ describe FFI::StructEx do
     end
   end
 
+  describe "#size and #alignment with pack 1" do
+    def test_size_and_alignment(specs, size, alignment)
+      klass = Class.new(described_class) do
+        pack 1
+        layout(*specs)
+      end
+
+      klass.size.should == size
+      klass.alignment.should == alignment
+    end
+
+    it "should work by declaring ffi type" do
+      test_size_and_alignment([:f0, :short,
+                               :f1, :char,
+                               :f2, :char], 4, 1)
+
+      test_size_and_alignment([:f0, :short,
+                               :f1, :char], 3, 1)
+      test_size_and_alignment([:f0, :char,
+                               :f1, :short], 3, 1)
+    end
+
+    it "should work by only declaring bit field with default type" do
+      test_size_and_alignment([:f0, 31,
+                               :f1, 31], 8, 1)
+
+      test_size_and_alignment([:f0, 8,
+                               :f1, 16], 3, 1)
+      test_size_and_alignment([:f0, 16,
+                               :f1, 8], 3, 1)
+
+      test_size_and_alignment([:f0, 1,
+                               :f1, 16,
+                               :f2, 1], 4, 1)
+    end
+
+    it "should work by declaring bit field and ffi type" do
+      test_size_and_alignment([:f0, 'uint32: 1',
+                               :f1, :uint16], 6, 1)
+    end
+    let(:klass1) {
+
+    }
+
+    let(:klass1) {
+      klass = Class.new(FFI::StructEx) do
+                pack 1
+                layout :bits_0_2, 'uint16: 3',
+                        :bit_3,    'uint16: 1',
+                        :bit_4,    'uint16: 1',
+                        :bits_5_7, 'uint16: 3',
+                        :bits_8_15, :uint8
+              end
+      Class.new(FFI::StructEx) do
+        pack 1
+        layout :f0, klass,
+               :f1, :uint8,
+               :f2, :uint8,
+               :f3, :uint8
+      end
+    }
+
+    let(:klass2) {
+      klass = Class.new(FFI::StructEx) do
+                layout :bits_0_2, 'uint16: 3',
+                        :bit_3,    'uint16: 1',
+                        :bit_4,    'uint16: 1',
+                        :bits_5_7, 'uint16: 3',
+                        :bits_8_15, :uint8
+              end
+      Class.new(FFI::StructEx) do
+        pack 1
+        layout :f0, klass,
+               :f1, :uint8,
+               :f2, :uint8,
+               :f3, :uint8
+      end
+    }
+
+    it "should work by declaring embedded field" do
+      klass1.size.should == 6
+      klass1.offset_of(:f1).should == 3
+
+      klass2.size.should == 7
+      klass2.offset_of(:f1).should == 4
+    end
+  end
+
   describe "#==" do
     context "when given embedded struct" do
       let(:hash) { {f0: {bits_0_2: 0b001, bit_3: 0b1, bit_4: 0b0, bits_5_7: 0b011}, f1: 0x1} }

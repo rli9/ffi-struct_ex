@@ -141,7 +141,7 @@ module FFI
             if bits_unit && bits_unit[:ffi_type].size == ffi_type.size && bits_unit[:bits_size] + bits_size <= bits_unit[:ffi_type].size * 8
               bits_unit[:bits_size] += bits_size
             else
-              offset = builder.send(:align, builder.size, [@min_alignment || 1, ffi_type.alignment].max)
+              offset = builder.send(:align, builder.size, @packed ? [@packed, ffi_type.alignment].min : [@min_alignment || 1, ffi_type.alignment].max)
               bits_unit = {ffi_type: ffi_type, bits_size: bits_size}
             end
 
